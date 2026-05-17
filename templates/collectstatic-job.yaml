@@ -1,4 +1,15 @@
 # collectstatic-job.yaml
+#
+# Runs as a helm pre-install/pre-upgrade hook. The hook annotations move this
+# Job out of the regular release lifecycle, so `helm upgrade --wait` no longer
+# polls it as part of the release's resources. That fixes the recurring
+# race where ttlSecondsAfterFinished would delete the completed Job before
+# helm's poller could observe it, producing "Job ... NotFound" failures.
+#
+# - hook-delete-policy: before-hook-creation deletes any prior Job with the
+#   same name before creating a fresh one (no AlreadyExists errors on retry).
+# - hook-delete-policy: hook-succeeded cleans up the Job after success.
+# - hook-weight: "-5" lets multiple pre-deploy hooks order themselves.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -8,9 +19,17 @@ metadata:
     helm.sh/chart: {{ include "django.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   template:
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: {{ .Chart.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
