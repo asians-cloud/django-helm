@@ -40,6 +40,21 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1000
 
+# ---- Workload mode (default = web: nginx + daphne) ----
+# Celery worker/beat: set celerypy.enabled=true and provide deployment.args.
+celerypy:
+  enabled: false
+  role: worker          # worker | beat — selects the liveness probe
+deployment:
+  args: []              # e.g. [-A, config.celery_app, worker, -l, info, -Q, <queue>]
+# Telegram bot: one container per entry (name/command/args/livenessProbe).
+commands: []
+# Optional extra volumes/mounts for celery/tgbot pods (replaces the old vault-CSI mount).
+pvc:
+  enabled: false
+  volumes: []
+  volumeMounts: []
+
 service:
   type: ClusterIP
   port: 8000

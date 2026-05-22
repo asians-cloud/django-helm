@@ -10,6 +10,9 @@
 #   same name before creating a fresh one (no AlreadyExists errors on retry).
 # - hook-delete-policy: hook-succeeded cleans up the Job after success.
 # - hook-weight: "-5" lets multiple pre-deploy hooks order themselves.
+#
+# Web mode only — celery workers and tgbots don't serve static files.
+{{- if not (or .Values.celerypy.enabled .Values.commands) }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -40,3 +43,4 @@ spec:
               name: {{ include "django.fullname" . }}-config
       restartPolicy: Never
   backoffLimit: 4
+{{- end }}

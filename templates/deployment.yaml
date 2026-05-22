@@ -24,15 +24,95 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "django.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.celerypy.enabled }}
+      # ---- celery worker/beat mode ----
+      {{- if .Values.pvc.enabled }}
+      volumes:
+        {{- toYaml .Values.pvc.volumes | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: "{{ .Chart.Name }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ['/entrypoint', 'celery']
+          args:
+            {{- range .Values.deployment.args }}
+            - {{ . }}
+            {{- end }}
+          {{- if eq .Values.celerypy.role "worker" }}
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A config.celery_app inspect ping -d celery@$HOSTNAME"]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+          {{- end }}
+          {{- if eq .Values.celerypy.role "beat" }}
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A config.celery_app status | grep -o ': OK'"]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+          {{- end }}
+          {{- if .Values.pvc.enabled }}
+          volumeMounts:
+            {{- toYaml .Values.pvc.volumeMounts | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "django.fullname" . }}-config
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- else if .Values.commands }}
+      # ---- tgbot mode (one container per .Values.commands entry) ----
+      {{- if .Values.pvc.enabled }}
+      volumes:
+        {{- toYaml .Values.pvc.volumes | nindent 8 }}
+      {{- end }}
+      containers:
+        {{- range .Values.commands }}
+        - name: "{{ .name }}"
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            {{- toYaml .command | nindent 12 }}
+          args:
+            {{- range .args }}
+            - {{ . }}
+            {{- end }}
+          {{- with .livenessProbe }}
+          livenessProbe:
+            exec:
+              command:
+                {{- toYaml .command | nindent 16 }}
+          {{- end }}
+          {{- if $.Values.pvc.enabled }}
+          volumeMounts:
+            {{- toYaml $.Values.pvc.volumeMounts | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "django.fullname" $ }}-config
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+        {{- end }}
+      {{- else }}
+      # ---- web mode (nginx + daphne) ----
       volumes:
         - name: nginx-conf
           configMap:
             name: {{ include "django.fullname" . }}-sites-enabled-configmap
         - name: staticfiles
           emptyDir: {}
-      serviceAccountName: {{ include "django.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -41,18 +121,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "django.fullname" . }}-config
-        # USE THIS BLOCK IF YOU CONFIGURED A JOB FOR COLLECTING STATIC FILES          
-        # - name: wait-for-collectstatic
-        #   image: lachlanevenson/k8s-kubectl:v1.12.4
-        #   imagePullPolicy: IfNotPresent
-        #   command:
-        #     - "kubectl"
-        #     - "get"
-        #     - "jobs"
-        #     - {{ include "django.fullname" . }}-collectstatic-job
-        #     - "-o"
-        #     - jsonpath='{.status.conditions[?(@.type=="Complete")].status}' | grep True ; do sleep 1 ; done
-        # USE THIS BLOCK IF YOU'RE USING LOCAL STATIC FILES   
         - name: collectstatic
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: Always
@@ -75,19 +143,6 @@ spec:
               mountPath: /etc/nginx/conf.d/
             - name: staticfiles # only necessary if serving staticfiles locally
               mountPath: /var/www/html/
-#           readinessProbe:
-#             httpGet:
-#               path: /icinga/
-#               port: 8000
-#             initialDelaySeconds: 10
-#             periodSeconds: 10
-#           livenessProbe:
-#             httpGet:
-#               path: /icinga/
-#               port: 8000
-#             initialDelaySeconds: 10
-#             periodSeconds: 10
-#             failureThreshold: 10
           resources:
             requests:
               cpu: 10m
@@ -101,22 +156,12 @@ spec:
             - name: daphne
               containerPort: 9000
               protocol: TCP
-#           livenessProbe:
-#             httpGet:
-#               path: /icinga/
-#               port: daphne
-#           readinessProbe:
-#             httpGet:
-#               path: /icinga/
-#               port: daphne
-#             initialDelaySeconds: 5
-#             timeoutSeconds: 30
-#             failureThreshold: 10
           envFrom:
             - configMapRef:
                 name: {{ include "django.fullname" . }}-config
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
