@@ -1,15 +1,16 @@
 # collectstatic-job.yaml
 #
-# Runs as a helm pre-install/pre-upgrade hook. The hook annotations move this
-# Job out of the regular release lifecycle, so `helm upgrade --wait` no longer
-# polls it as part of the release's resources. That fixes the recurring
-# race where ttlSecondsAfterFinished would delete the completed Job before
-# helm's poller could observe it, producing "Job ... NotFound" failures.
+# Runs as a helm POST-install/POST-upgrade hook so it executes AFTER the release's
+# normal resources exist — in particular the `<fullname>-config` ConfigMap it reads
+# via envFrom. (As a pre-install hook it deadlocked on a FRESH install: the hook ran
+# before the ConfigMap was created -> "configmap not found" -> helm hangs.) Being a
+# hook still keeps it out of `helm upgrade --wait`'s resource polling, avoiding the
+# old ttl-delete "Job ... NotFound" race.
 #
 # - hook-delete-policy: before-hook-creation deletes any prior Job with the
 #   same name before creating a fresh one (no AlreadyExists errors on retry).
 # - hook-delete-policy: hook-succeeded cleans up the Job after success.
-# - hook-weight: "-5" lets multiple pre-deploy hooks order themselves.
+# - hook-weight: "5" runs it after lower-weighted post hooks.
 #
 # Web mode only — celery workers and tgbots don't serve static files.
 {{- if not (or .Values.celerypy.enabled .Values.commands) }}
@@ -23,8 +24,8 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   template:
