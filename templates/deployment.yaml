@@ -168,6 +168,10 @@ spec:
             - name: daphne
               containerPort: 9000
               protocol: TCP
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- else }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -177,6 +181,7 @@ spec:
             successThreshold: 1
             timeoutSeconds: 10
             failureThreshold: 5
+          {{- end }}
           {{- if .Values.pvc.enabled }}
           volumeMounts:
             {{- toYaml .Values.pvc.volumeMounts | nindent 12 }}
